@@ -2,71 +2,144 @@ import os
 import csv
 from datetime import datetime
 from ibapi.ticktype import TickTypeEnum
+from datetime import datetime, timedelta
 
-def create_csv_if_not_exists(csv_file_path, headers=None):
-    """Creates a CSV file with headers if it doesn't exist. Headers can be specified or left empty.
-    
-    Args:
-        csv_file_path (str): Path to the CSV file to be created.
-        headers (list, optional): List of headers to write to the CSV file. Defaults to None.
-        
-    Returns:
-        bool: True if the CSV file was created, False if it already exists.
+
+# true if csv is there, otherwise false
+def is_csv_found(csv_file_path):
+    return os.path.exists(csv_file_path)
+
+   # Create or overwrite the CSV file with the specified headers
+def create_csv_file(csv_file_path, headers):
+    """Creates a CSV file at the given path with the specified headers.
     """
-    if not os.path.exists(csv_file_path):
-        with open(csv_file_path, 'w', newline='') as file:
-            writer = csv.writer(file)
-            if headers:
-                writer.writerow(headers)  # Write headers if provided
-            print("CSV file did not exist. Created new file with headers.")
-        return True
-    return False
+    with open(csv_file_path, 'w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(headers)
+        print(f"CSV file '{csv_file_path}' created with headers: {headers}")
 
-def recreate_csv_if_older_data(csv_file_path):
+
+def is_there_old_data(csv_file_path):
     """Checks if the data in the CSV file is older than today, and recreates the file if necessary."""
-    if os.path.exists(csv_file_path) and os.path.getsize(csv_file_path) > 0:
+    second_row = read_second_row(csv_file_path)
+    
+    # If second_row is empty, return False
+    if not second_row:
+        return False
+
+    try:
+        first_date = process_timestamp_from_row(second_row)
+        
+        # If the first_date could not be parsed, return False
+        if first_date is None:
+            return False
+
+        today = datetime.today().date()
+        
+        return first_date < today
+    
+    except Exception as e:
+        print(f"Error while checking old data: {e}")
+        return False
+
+# Tää olettaa että csv file löytyi ja että sillä on headerit valmiina
+def recreate_csv_file(csv_file_path):
+    """Recreates a CSV file at the given path, keeping the existing headers intact.
+    """
+
+    with open(csv_file_path, 'r', newline='') as file:
+        reader = csv.reader(file)
+        headers = next(reader, [])  # Read the headers
+        
+    # Overwrite the CSV file but keep the headers
+    with open(csv_file_path, 'w', newline='') as file:
+        writer = csv.writer(file)
+        if headers:
+            writer.writerow(headers)  # Write the headers back into the file
+    print(f"CSV file '{csv_file_path}' recreated with existing headers.")
+    return True
+
+# Käy tsekkaamassa 2. rivin
+def read_second_row(csv_file_path):
+    """Reads the second row from a CSV file.
+    """
+    try:
         with open(csv_file_path, 'r', newline='') as file:
             reader = csv.reader(file)
-            headers = next(reader)  # Read headers
-            first_row = next(reader, None)  # Get the first row of data
+            next(reader)  # Skip the first row (typically the header)
+            # Read the second row; returns an empty list if there is no second row
+            second_row = next(reader, None)
+            if second_row is None:
+                print(f"No second row found: {csv_file_path}")
+                return []
+            return second_row
+    except FileNotFoundError:
+        print(f"File not found: {csv_file_path}")
+        return []
+    except Exception as e:
+        print(f"Error reading file: {e}")
+        return []
 
-            if first_row:
-                first_timestamp = first_row[0]
-                first_date = None
-                formats = [
-                    '%Y-%m-%d %H:%M:%S.%f',  # Format with microseconds
-                    '%Y%m%d %H:%M:%S'         # Compact format without dashes
-                ]
-                
-                for fmt in formats:
-                    try:
-                        first_date = datetime.strptime(first_timestamp, fmt).date()
-                        break
-                    except ValueError:
-                        continue
-                
-                if first_date is None:
-                    print(f"Unrecognized timestamp format: {first_timestamp}")
-                    return False
-                
-                today = datetime.today().date()
-                
-                if first_date < today:
-                    print("Data is older than today. Recreating CSV file.")
-                    with open(csv_file_path, 'w', newline='') as file:
-                        writer = csv.writer(file)
-                        writer.writerow(headers)  # Rewrite headers
-                    return True
+
+def parse_timestamp(timestamp):
+    """Parses a timestamp and returns the date if successful, or None if the format is unrecognized.
+    """
+    formats = [
+        '%Y-%m-%d %H:%M:%S.%f',  # Format with microseconds
+        '%Y%m%d %H:%M:%S'         # Compact format without dashes
+    ]
+    
+    for fmt in formats:
+        try:
+            date = datetime.strptime(timestamp, fmt).date()
+            return date
+        except ValueError:
+            continue
+    
+    print(f"Unrecognized timestamp format: {timestamp}")
+    return None
+
+
+def process_timestamp_from_row(row):
+    """Processes the timestamp from a given row.
+    """
+    if row:
+        first_timestamp = row[0]
+        first_date = parse_timestamp(first_timestamp)
+        return first_date
+    
+    return None
+
+
+def recreate_csv_if_older_data(csv_file_path):
+
+    """Checks if the data in the CSV file is older than today, and recreates the file if necessary."""
+    second_row = read_second_row(csv_file_path)
+
+    # If the second row is empty, there is no data to check, so return False
+    if not second_row:
+        return False
+
+    # Process the timestamp from the second row
+    first_date = process_timestamp_from_row(second_row)
+    
+    # If the timestamp could not be parsed, return False
+    if first_date is None:
+        return False
+        
+    # Check if the date in the second row is older than today
+    today = datetime.today().date()
+    if first_date < today:
+        recreate_csv_file(csv_file_path)
+        return True
+        
     return False
 
 def read_existing_timestamps(csv_file_path):
     """Reads existing timestamps from the CSV file."""
-    existing_timestamps = set()
-    if os.path.exists(csv_file_path) and os.path.getsize(csv_file_path) > 0:
-        with open(csv_file_path, 'r', newline='') as file:
-            reader = csv.reader(file)
-            headers = next(reader)  # Skip headers
-            existing_timestamps = {row[0] for row in reader}  # Assuming timestamp is the first column
+    with open(csv_file_path, 'r', newline='') as file:
+        reader = csv.reader(file)
+        existing_timestamps = {row[0] for row in reader}  # Assuming timestamp is the first column
     return existing_timestamps
 
 def filter_new_data(historical_data, existing_timestamps):
@@ -78,53 +151,37 @@ def filter_new_data(historical_data, existing_timestamps):
             new_rows.append(row)
     return new_rows
 
-def append_new_data_to_csv(csv_file_path, new_rows, file_exists):
+def append_new_data_to_csv(csv_file_path, new_rows):
     """Appends new data to the CSV file."""
     with open(csv_file_path, 'a', newline='') as file:
         writer = csv.writer(file)
-        if not file_exists or os.path.getsize(csv_file_path) == 0:
-            writer.writerow(['date', 'open', 'high', 'low', 'close', 'volume'])  # Write headers
         writer.writerows(new_rows)
+        # Print the new rows that were added
+    if new_rows:
+        print(f"{len(new_rows)} new rows added to '{csv_file_path}'.")
+        last_row = new_rows[-1]  # Get the last row that was added
+        print("Last row added:", last_row)
 
-def save_historical_data(csv_file_path, historical_data):
-    """Main function to save historical data to a CSV file, handling creation and recreation if needed."""
-    
-    headers = ['date', 'open', 'high', 'low', 'close', 'volume']
 
-    # Create CSV if it doesn't exist
-    file_created = create_csv_if_not_exists(csv_file_path,headers)
-    
-    # Recreate CSV if it contains older data
-    if not file_created:
-        file_recreated = recreate_csv_if_older_data(csv_file_path)
-    
-    existing_timestamps = set()
-    if not file_created and not file_recreated:  # Only read timestamps if the file wasn't recreated or created
-        existing_timestamps = read_existing_timestamps(csv_file_path)
-    
-    # Filter and save new data
-    new_rows = filter_new_data(historical_data, existing_timestamps)
-    append_new_data_to_csv(csv_file_path, new_rows, os.path.exists(csv_file_path))
-    
-    return len(new_rows)
-
-def handle_tick_price(csv_file_path, tick_buffer, tickType, price, buffer_limit):
-    """Handles incoming tick price updates, buffers the data, and writes to CSV when the buffer is full.
-    
-    Args:
-        csv_file_path (str): Path to the CSV file where tick data is stored.
-        tick_buffer (list): A list to buffer incoming tick data before writing to disk.
-        tickType (int): The type of tick received (e.g., LAST price).
-        price (float): The price from the tick data.
-        buffer_limit (int): The limit at which the buffer is flushed to disk.
+"Muuta historiadatan formaatti ennen tallentamista"            
+def convert_datetime_format(original_datetime_str):
+    """Converts a datetime string from 'YYYYMMDD HH:MM:SS' format to 'YYYY-MM-DD HH:MM:SS' format.
     """
-    # Create CSV if it doesn't exist
-    file_created = create_csv_if_not_exists(csv_file_path,headers=None)
-        # Recreate CSV if it contains older data
-    if not file_created:
-        file_recreated = recreate_csv_if_older_data(csv_file_path)
+    # Define the original format and the target format
+    original_format = '%Y%m%d %H:%M:%S'
+    target_format = '%Y-%m-%d %H:%M:%S'
     
+    # Parse the original datetime string to a datetime object
+    datetime_obj = datetime.strptime(original_datetime_str, original_format)
     
+    # Format the datetime object to the target format
+    converted_datetime_str = datetime_obj.strftime(target_format)
+    
+    return converted_datetime_str
+
+def process_last_price_tick(tick_buffer, tickType, price, buffer_limit, csv_file_path):
+    """Processes LAST price ticks, buffers the data, and writes to CSV when the buffer is full.
+    """
     # Only process LAST price ticks
     if TickTypeEnum.to_str(tickType) == "LAST":
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f%z')
@@ -137,6 +194,83 @@ def handle_tick_price(csv_file_path, tick_buffer, tickType, price, buffer_limit)
                 csv_writer.writerows(tick_buffer)
                 csv_file.flush()  # Ensure data is written to disk immediately
             tick_buffer.clear()  # Clear the buffer after writing
-            
-        print(f"Timestamp: {timestamp}, price: {price}")
+
+        # Print the processed tick data
+        #print(f"Timestamp: {timestamp}, price: {price}")
+
+def has_excess_data(csv_file_path, max_lines=500):
+    """
+    Checks if a CSV file has more than `max_lines` lines (including the header).
+    """
+    with open(csv_file_path, 'r', newline='') as file:
+        reader = csv.reader(file)
+        total_lines = sum(1 for _ in reader)
+
+    return total_lines > max_lines
+
+def remove_excess_data(csv_file_path, lines_to_remove=400):
+    """
+    Removes the first `lines_to_remove` data rows from a CSV file, leaving the header and the remaining rows intact.
+.
+    """
+    with open(csv_file_path, 'r', newline='') as file:
+        reader = csv.reader(file)
+        rows = list(reader)
+
+    if len(rows) > lines_to_remove + 1:  # +1 to account for the header row
+        header = rows[0]
+        remaining_rows = rows[:1] + rows[lines_to_remove + 1:]  # Keep the header and remove the first `lines_to_remove` rows
+
+        with open(csv_file_path, 'w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerows(remaining_rows)
+
+        print(f"Removed the first {lines_to_remove} data rows from '{csv_file_path}'. {len(remaining_rows) - 1} rows remain.")
+        return True
+
+    return False
+
+
+def save_historical_data(csv_file_path, historical_data):
+    """Main function to save historical data to a CSV file, handling creation and recreation if needed."""
+    
+    headers = ['date', 'open', 'high', 'low', 'close', 'volume']
+    
+    if not is_csv_found(csv_file_path):
+    # Create CSV if it doesn't exist
+        create_csv_file(csv_file_path,headers)
+
+    if is_there_old_data(csv_file_path): # Jos csv:ssä on vanhaa dataa tee se uudelleen
+    # Recreate leaving headers if there was old data to be found
+        recreate_csv_file(csv_file_path)
+        existing_timestamps = set()  # Start with an empty set since the file was recreated
+    else:
+        # Only read existing timestamps if the file was not recreated
+        existing_timestamps = read_existing_timestamps(csv_file_path)
+    
+    # Filter and save new data
+    new_rows = filter_new_data(historical_data, existing_timestamps)
+    append_new_data_to_csv(csv_file_path, new_rows)
+
+
+def save_market_data(csv_file_path, tick_buffer, tickType, price, buffer_limit):
+    """Handles incoming tick price updates, buffers the data, and writes to CSV when the buffer is full.
+
+    """
+    headers = ['time','price']
+
+    if not is_csv_found(csv_file_path):   # Luo uusi csv jos sitä ei löydy
+    # Create CSV if it doesn't exist
+        create_csv_file(csv_file_path,headers)
+
+    if is_there_old_data(csv_file_path): # Jos csv:ssä on vanhaa dataa tee se uudelleen
+    # Recreate leaving headers if there was old data to be found
+        recreate_csv_file(csv_file_path)
+    
+    if has_excess_data(csv_file_path, max_lines=200):
+        # Step 2: If there is too much data, remove the excess
+        remove_excess_data(csv_file_path, lines_to_remove=100)
+
+  # Process the tick price data
+    process_last_price_tick(tick_buffer, tickType, price, buffer_limit, csv_file_path)
 

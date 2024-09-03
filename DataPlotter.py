@@ -99,14 +99,12 @@ if __name__ == '__main__':
     # Initialize a set to remember which tick timestamps were updated
     updated_timestamps = set()
     last_minute_processed = None
+    last_tick_timestamp = None
 
     while True:
 
-        df2 = pd.read_csv('market_data.csv', header=None)
+        df2 = pd.read_csv('market_data.csv', header=0)
         
-        # Create an empty DataFrame with a header
-        df2.columns = ['time', 'price']
-
         # Filter new ticks
         df_t = filter_new_ticks(df, df2)
 
@@ -127,10 +125,15 @@ if __name__ == '__main__':
             # Print the number of data points found
             print(f"Found {len(df_t)} data point(s) from CSV.")
             
+            
+
             for _, row in df_t.iterrows():
                 current_time = row['time']
                 current_price = row['price']
                 
+                # Convert current_time to a string in the format 'YYYY-MM-DD HH:MM'
+                current_time_str = current_time.strftime('%Y-%m-%d %H:%M')
+
                 # Only update the chart if the timestamp has not been updated before
                 if current_time not in updated_timestamps:
                     chart.update_from_tick(row)
@@ -139,16 +142,23 @@ if __name__ == '__main__':
                 else:
                     print(f"Skipped updating chart for timestamp {current_time} as it was updated earlier.")
 
-                # Check if the minute has changed
-                minute_timestamp = pd.to_datetime(current_time).strftime('%Y-%m-%d %H:%M')
-                if last_minute_processed is None or last_minute_processed != minute_timestamp:
-                    # Update chart and VWAP
-                    print(f"Minute change detected. Updating chart with historical data at {minute_timestamp}.")
-                    df = pd.read_csv('historical_data.csv')
+                # Check if this is the first iteration or if a new minute has started
+                if last_tick_timestamp is None or current_time_str != last_tick_timestamp.strftime('%Y-%m-%d %H:%M'):
+                    
+                    print(f"Minute change detected. Updating chart with historical data at {current_time_str}.")
+                    sleep(5)
+                    # Read only the last row from the CSV file
+                    last_row = pd.read_csv('historical_data.csv').tail(1)
+
+                    # Append the last row to the existing DataFrame
+                    df = pd.concat([df, last_row], ignore_index=True)
+
+                    # Update the chart with the new data
                     chart.set(df)
                     vwap_df = calculate_vwap(df)
                     line.set(vwap_df)
-                    last_minute_processed = minute_timestamp  # Update the last processed minute
-
+                
+                # Update last_tick_timestamp to the current time
+                last_tick_timestamp = current_time
         else:
             sleep(1)

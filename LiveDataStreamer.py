@@ -8,7 +8,7 @@ import csv
 from ibapi.ticktype import TickTypeEnum
 import time
 import os
-from csv_operations import save_historical_data, handle_tick_price
+from csv_operations import save_historical_data, save_market_data
 
 port = 7497
 
@@ -19,7 +19,7 @@ class TestApp(EClient, EWrapper):
         self.historical_data = []
         self.last_minute = None
         self.tick_buffer = []  # Buffer to hold ticks before writing to the CSV file
-        self.buffer_limit = 2  # Number of ticks to buffer before writing to the file
+        self.buffer_limit = 1  # Number of ticks to buffer before writing to the file
         self.historical_data_path = 'historical_data.csv'
         self.tick_data_path = 'market_data.csv'
 
@@ -38,7 +38,7 @@ class TestApp(EClient, EWrapper):
 
     def tickPrice(self, reqId: int, tickType, price, attrib):
         """Handles tick price updates."""
-        handle_tick_price(self.tick_data_path, self.tick_buffer, tickType, price, self.buffer_limit)
+        save_market_data(self.tick_data_path, self.tick_buffer, tickType, price, self.buffer_limit)
 
     def historicalData(self, reqId, bar):
         # Scale volume by a factor of 100
@@ -57,7 +57,6 @@ class TestApp(EClient, EWrapper):
         # Clear the historical data after saving
         self.historical_data = []
         
-        print(f"New historical data recorded: {num_new_rows} rows")
 
     def monitor_time_and_request_historical_data(self, contract):
         while True:
@@ -73,8 +72,8 @@ class TestApp(EClient, EWrapper):
                 formatted_time = current_time.strftime('%Y%m%d %H:%M:%S US/Eastern')
                 
                 # Debugging output
-                print(f"Request ID: {req_id}")
-                print(f"Request Time: {formatted_time}")
+                #print(f"Request ID: {req_id}")
+                #print(f"Request Time: {formatted_time}")
                 #print(f"Contract: {contract}")
 
                 # Perform the historical data request
